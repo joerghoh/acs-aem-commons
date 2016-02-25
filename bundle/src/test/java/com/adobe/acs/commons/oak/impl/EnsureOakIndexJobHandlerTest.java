@@ -19,25 +19,32 @@
  */
 package com.adobe.acs.commons.oak.impl;
 
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyBoolean;
+import static org.mockito.Matchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
 import javax.jcr.RepositoryException;
 
-import org.junit.Assert;
 import org.apache.sling.api.resource.PersistenceException;
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ValueMap;
 import org.apache.sling.testing.resourceresolver.MockValueMap;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Matchers;
 import org.mockito.Spy;
-
-import static org.mockito.Mockito.*;
-
 import org.mockito.runners.MockitoJUnitRunner;
 
 import com.adobe.acs.commons.oak.impl.EnsureOakIndex.OakIndexDefinitionException;
@@ -236,4 +243,7 @@ public class EnsureOakIndexJobHandlerTest {
         verify(handler, never()).forceRefresh(any(Resource.class));
     }
 
+    
+
+    
 }
