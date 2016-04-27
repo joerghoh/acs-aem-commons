@@ -2,6 +2,7 @@ package com.adobe.acs.commons.wcm.impl;
 
 import com.adobe.acs.commons.util.BufferingResponse;
 import com.adobe.granite.xss.XSSAPI;
+import com.day.cq.wcm.api.WCMMode;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.text.StrLookup;
@@ -23,6 +24,7 @@ import javax.servlet.FilterConfig;
 import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
+import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -110,6 +112,18 @@ public class AemEnvironmentIndicatorFilter implements Filter {
     private String css = "";
 
     private ServiceRegistration filterRegistration;
+    
+    
+    private static final String DEFAULT_DISALLOWED_WCM_MODES = "DISABLED";
+    @Property (label="Disallowed WCM modes", 
+            description = "Don't show up in these WCM modes", 
+            value = DEFAULT_DISALLOWED_WCM_MODES,
+            cardinality = Integer.MAX_VALUE)
+    public static final String PROP_DISALLOWED_WCM_MODES = "disallowed-wcmmodes";
+    private String[] disallowedWcmModes;
+    
+    private static final String WCM_MODE_PARAM = "wcmmode";
+    
 
     @Override
     public void init(final FilterConfig filterConfig) throws ServletException {
@@ -133,6 +147,16 @@ public class AemEnvironmentIndicatorFilter implements Filter {
             filterChain.doFilter(request, response);
             return;
         }
+        
+        // if a configured WCM mode is detected, don't attach the indicator
+        WCMMode mode = extractWcmMode ( request);
+        for (String m : disallowedWcmModes) {
+            if (mode.equals(WCMMode.valueOf(m))) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+        }
+        
 
         final BufferingResponse capturedResponse = new BufferingResponse(response);
 
@@ -231,6 +255,9 @@ public class AemEnvironmentIndicatorFilter implements Filter {
             filterProps.put("pattern", ".*");
             filterRegistration = ctx.getBundleContext().registerService(Filter.class.getName(), this, filterProps);
         }
+        
+        disallowedWcmModes = PropertiesUtil.toStringArray(config.get(PROP_DISALLOWED_WCM_MODES));
+        
     }
 
 
@@ -243,5 +270,39 @@ public class AemEnvironmentIndicatorFilter implements Filter {
 
         // Reset CSS variable
         css = "";
+    }
+    
+    
+    /**
+     * Extract the WCM Mode from the request;
+     * We cannot simply use WCMMode.fromRequest() here, because we don't have
+     * a SlingHttpServletRequest; so we do it all manually
+     * @param request
+     * @return
+     */
+    private WCMMode extractWcmMode (HttpServletRequest request) {
+        WCMMode mode = (WCMMode) request.getAttribute(WCMMode.REQUEST_ATTRIBUTE_NAME);
+        
+        if (mode == null) {
+            mode = WCMMode.DISABLED;
+        }
+        // handle overwriting via request parameter and Cookies
+        String modeChange =  request.getParameter(WCM_MODE_PARAM);
+        if (modeChange == null) {
+            for (Cookie c : request.getCookies()) {
+                if (c.getName().equals(WCM_MODE_PARAM)) {
+                    modeChange = c.getValue();
+                }
+            }
+         
+        }
+        if (modeChange != null) {
+            try {
+                mode = WCMMode.valueOf(modeChange.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("Illegal wcm mode change requested: {}", modeChange);
+            }
+        }
+        return mode;
     }
 }
