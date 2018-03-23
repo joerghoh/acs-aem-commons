@@ -32,13 +32,6 @@ import com.day.cq.commons.jcr.JcrConstants;
 import com.day.cq.search.QueryBuilder;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.felix.scr.annotations.Activate;
-import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.Deactivate;
-import org.apache.felix.scr.annotations.Property;
-import org.apache.felix.scr.annotations.PropertyOption;
-import org.apache.felix.scr.annotations.Reference;
-import org.apache.felix.scr.annotations.Service;
 import org.apache.sling.api.SlingConstants;
 import org.apache.sling.api.SlingHttpServletRequest;
 import org.apache.sling.api.SlingHttpServletResponse;
@@ -54,6 +47,14 @@ import org.apache.sling.commons.auth.Authenticator;
 import org.apache.sling.commons.osgi.PropertiesUtil;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
+import org.osgi.service.component.annotations.Activate;
+import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.Deactivate;
+import org.osgi.service.component.annotations.Reference;
+import org.osgi.service.metatype.annotations.AttributeDefinition;
+import org.osgi.service.metatype.annotations.Designate;
+import org.osgi.service.metatype.annotations.Option;
+import org.osgi.service.metatype.annotations.ObjectClassDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,12 +79,133 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component(
-        label = "ACS AEM Commons - Error Page Handler",
-        description = "Error Page Handling module which facilitates the resolution of errors "
-                + "against author-able pages for discrete content trees.",
-        immediate = false, metatype = true)
-@Service
+        name = "ACS AEM Commons - Error Page Handler"
+        )
+@Designate(ocd = ErrorPageHandlerImpl.Configuration.class)
 public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
+	
+	
+	@ObjectClassDefinition(name="ACS AEM Commons - Error Page Handler")
+	public @interface Configuration {
+		
+	    /* Enable/Disable */
+	    @AttributeDefinition(
+	    		name="Enable",
+	    		description="Enables/Disables the error handler. [Required]")
+	    boolean enabled() default true;
+
+	    /* Enable/Disable Vanity Dispatch check*/
+	    @AttributeDefinition(
+	    		name="Vanity Dispatch Check",
+	    		description="Enables/Disables Vanity Dispatch check, "
+	    	            + "if this is enabled and current request URI is a valid vanity (after performing resource resolver mapping), "
+	    	            + "request will be forwarded to it. [Optional... but recommended when using resource resolver based out-going mapping] [Default: false]"
+	    		)
+	    boolean vanity_dispatch_enabled() default false;
+	    
+	    
+	    /* Error Page Extension */	    
+	    @AttributeDefinition(
+	    		name="Error page extension",
+	    		description = "Examples: html, htm, xml, json. [Optional] [Default: html]"
+	    		)
+	    String errorpage_extension() default "html"; // Changed from error-page.extension
+
+	    
+	    /* Fallback Error Code Extension */
+	    @AttributeDefinition(
+	    		name="Fallback error page name",
+	    		description = "Error page name (not path) to use if a valid Error Code/Error Servlet Name cannot be "
+	                    + "retrieved from the Request. [Required] [Default: 500]"
+	    		)
+	    String errorpage_fallbackname() default "500"; // Changed from "error-page.fallback-name"
+	    
+	    /* System Error Page Path */	    
+	    @AttributeDefinition(
+	    		name= "System error page",
+	            description = "Absolute path to system Error page resource to serve if no other more appropriate "
+	                    + "error pages can be found. Does not include extension. [Optional... but highly recommended]"
+	    		)
+	    String errorpage_systempath() default ""; // Changed from "error-page.system-path"
+	    
+	    /* Search Paths */	    
+	    @AttributeDefinition(
+	            name = "Error page paths",
+	            description = "List of inclusive content trees under which error pages may reside, "
+	                    + "along with the name of the the default error page for the content tree. This is a "
+	                    + "fallback/less powerful option to adding the ./errorPages property to CQ Page property dialogs."
+	                    + " Example: /content/geometrixx/en:errors [Optional]",
+	            cardinality = Integer.MAX_VALUE
+	    		)
+	    String[] paths() default {};
+	    
+	    /* Not Found Default Behavior */	    
+	    @AttributeDefinition(
+	            name = "Not Found Behavior",
+	            description = "Default resource not found behavior. [Default: Respond with 404]",
+	            options = {
+	                    @Option(label = "Redirect to Login", value = REDIRECT_TO_LOGIN),
+	                    @Option(label = "Respond with 404", value = RESPOND_WITH_404)
+	            }
+	    		)
+	    String notfound_behaviour() default RESPOND_WITH_404;
+	    
+	    /* Not Found Path Patterns */
+	    @AttributeDefinition(
+	            name = "Not Found Exclusions",
+	            description = "Regex path patterns that will act in the \"other\" (redirect-to-login vs. "
+	                    + " respond-with-404) way to the \"Not Found Behavior\". This allows the usual Not Found behavior"
+	                    + " to be defined via \"not-found.behavior\" with specific exclusions defined here. [Optional]",
+	            cardinality = Integer.MAX_VALUE
+	    		)
+	    String[] notfound_exclusionPathPattern() default {}; // was: not-found.exclusion-path-patterns
+	    
+
+	    /* serve authenticated requests from cache*/	    
+	    @AttributeDefinition(
+	    		name = "Serve authenticated from cache",
+	            description = "Serve authenticated requests from the error page cache. [ Default: false ]"
+	    		)
+	    boolean cache_serveAuthenticated() default false; // was: cache.serve-authenticated and serve-authenticated-from-cache
+	    
+
+	    /* TTL definition */
+	    @AttributeDefinition(
+	    		name = "TTL (in seconds)",
+	            description = "TTL for each cache entry in seconds. [ Default: 300 ]"
+	    		)
+	    int cache_ttl() default 300; // legacy "ttl"
+	    
+	    /* Enable/Disables error images */
+	    @AttributeDefinition(
+	    		name = "Enable placeholder images", 
+	    		description = "Enable image error handling  [ Default: false ]"
+	    		)
+	    boolean errorimages_enabled() default false; // was: error-images.enabled
+	    
+	    /* Relative placeholder image path */
+	    @AttributeDefinition(
+	    		name = "Error image path/selector",
+	            description = "Accepts a selectors.extension (ex. `.img.png`) absolute, or relative path. "
+	                    + "If an extension or relative path, this value is applied to the resolved error page."
+	                    + " Note: This concatenated path must resolve to a nt:file else a 200 response will be sent."
+	                    + " [ Optional ] [ Default: .img.png ]"
+	    		)
+	    String errorimages_path() default ".img.png";
+	    
+	    
+	    /* Error image extensions to handle */ 
+	    @AttributeDefinition(
+	    		name = "Error image extensions",
+	            description = "List of valid image extensions (no proceeding .) to handle. "
+	                    + "Example: 'png' "
+	                    + "[ Optional ] [ Default: png, jpeg, jpeg, gif ]",
+	            cardinality = Integer.MAX_VALUE
+	    		)
+	    String[] errorimages_extensions() default {"jpg", "jpeg", "png", "gif"};
+	    
+	}
+	
 
     private static final Logger log = LoggerFactory.getLogger(ErrorPageHandlerImpl.class);
 
@@ -94,153 +216,73 @@ public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
     private static final String REDIRECT_TO_LOGIN = "redirect-to-login";
     private static final String RESPOND_WITH_404 = "respond-with-404";
 
-    /* Enable/Disable */
-    private static final boolean DEFAULT_ENABLED = true;
 
-    private boolean enabled = DEFAULT_ENABLED;
-
-    @Property(label = "Enable", description = "Enables/Disables the error handler. [Required]",
-            boolValue = DEFAULT_ENABLED)
-    private static final String PROP_ENABLED = "enabled";
     
-    /* Enable/Disable Vanity Dispatch check*/
-    private static final boolean DEFAULT_VANITY_DISPATCH_ENABLED = false;
+    // Property name definitions
+    
+    private static final String LEGACY_PREFIX = "prop.";
+    
+    private static final String PROP_ENABLED = "enabled";
+    private static final String[] LEGACY_PROP_ENABLED = {"prop.enabled"};
 
-    private boolean vanityDispatchCheckEnabled = DEFAULT_VANITY_DISPATCH_ENABLED;
+    private static final String PROP_VANITY_DISPATCH_CHECK_ENABLED = "vanity.dispatch.enabled";
+    private static final String[] LEGACY_PROP_VANITY_DISPATCH_CHECK_ENABLED = {"prop.vanity.dispatch.enabled"};
 
-    @Property(label = "Vanity Dispatch Check", description = "Enables/Disables Vanity Dispatch check, "
-            + "if this is enabled and current request URI is a valid vanity (after performing resource resolver mapping), "
-            + "request will be forwarded to it. [Optional... but recommended when using resource resolver based out-going mapping] [Default: false]",
-            boolValue = DEFAULT_VANITY_DISPATCH_ENABLED)
-    private static final String PROP_VANITY_DISPATCH_ENABLED = "vanity.dispatch.enabled";
+    private static final String PROP_ERROR_PAGE_PATH = "errorpage.systempath";
+    private static final String[] LEGACY_PROP_ERROR_PAGE_PATH = {"error-page.system-path","prop.error-page.system-path"};
+    
+    private static final String PROP_ERROR_PAGE_EXTENSION = "errorpage.extension";
+    private static final String[] LEGACY_PROP_ERROR_PAGE_EXTENSION = {"error-page.extension", "prop.error-page.extension"};
 
-    /* Error Page Extension */
-    private static final String DEFAULT_ERROR_PAGE_EXTENSION = "html";
-
-    private String errorPageExtension = DEFAULT_ERROR_PAGE_EXTENSION;
-
-    @Property(label = "Error page extension",
-            description = "Examples: html, htm, xml, json. [Optional] [Default: html]",
-            value = DEFAULT_ERROR_PAGE_EXTENSION)
-    private static final String PROP_ERROR_PAGE_EXTENSION = "error-page.extension";
-
-    /* Fallback Error Code Extension */
-    private static final String DEFAULT_FALLBACK_ERROR_NAME = "500";
-
-    private String fallbackErrorName = DEFAULT_FALLBACK_ERROR_NAME;
-
-    @Property(
-            label = "Fallback error page name",
-            description = "Error page name (not path) to use if a valid Error Code/Error Servlet Name cannot be "
-                    + "retrieved from the Request. [Required] [Default: 500]",
-            value = DEFAULT_FALLBACK_ERROR_NAME)
-    private static final String PROP_FALLBACK_ERROR_NAME = "error-page.fallback-name";
-
-    /* System Error Page Path */
-    private static final String DEFAULT_SYSTEM_ERROR_PAGE_PATH_DEFAULT = "";
-
-    private String systemErrorPagePath = DEFAULT_SYSTEM_ERROR_PAGE_PATH_DEFAULT;
-
-    @Property(
-            label = "System error page",
-            description = "Absolute path to system Error page resource to serve if no other more appropriate "
-                    + "error pages can be found. Does not include extension. [Optional... but highly recommended]",
-            value = DEFAULT_SYSTEM_ERROR_PAGE_PATH_DEFAULT)
-    private static final String PROP_ERROR_PAGE_PATH = "error-page.system-path";
-
-    /* Search Paths */
-    private static final String[] DEFAULT_SEARCH_PATHS = {};
-
-    @Property(
-            label = "Error page paths",
-            description = "List of inclusive content trees under which error pages may reside, "
-                    + "along with the name of the the default error page for the content tree. This is a "
-                    + "fallback/less powerful option to adding the ./errorPages property to CQ Page property dialogs."
-                    + " Example: /content/geometrixx/en:errors [Optional]",
-            cardinality = Integer.MAX_VALUE)
+    private static final String PROP_FALLBACK_ERROR_NAME = "errorpage.fallbackname";
+    private static final String[] LEGACY_PROP_FALLBACK_ERROR_NAME = {"error-page.fallback-name","prop.error-page.fallback-name"};
+    
     private static final String PROP_SEARCH_PATHS = "paths";
-
-    /* Not Found Default Behavior */
-    private static final String DEFAULT_NOT_FOUND_DEFAULT_BEHAVIOR = RESPOND_WITH_404;
-    private String notFoundBehavior = DEFAULT_NOT_FOUND_DEFAULT_BEHAVIOR;
-
-    @Property(
-            label = "Not Found Behavior",
-            description = "Default resource not found behavior. [Default: Respond with 404]",
-            options = {
-                    @PropertyOption(value = "Redirect to Login", name = REDIRECT_TO_LOGIN),
-                    @PropertyOption(value = "Respond with 404", name = RESPOND_WITH_404)
-            },
-            value = DEFAULT_NOT_FOUND_DEFAULT_BEHAVIOR)
-    private static final String PROP_NOT_FOUND_DEFAULT_BEHAVIOR = "not-found.behavior";
-
-
-    /* Not Found Path Patterns */
-    private static final String[] DEFAULT_NOT_FOUND_EXCLUSION_PATH_PATTERNS = {};
-    private ArrayList<Pattern> notFoundExclusionPatterns = new ArrayList<Pattern>();
-
-    @Property(
-            label = "Not Found Exclusions",
-            description = "Regex path patterns that will act in the \"other\" (redirect-to-login vs. "
-                    + " respond-with-404) way to the \"Not Found Behavior\". This allows the usual Not Found behavior"
-                    + " to be defined via \"not-found.behavior\" with specific exclusions defined here. [Optional]",
-            cardinality = Integer.MAX_VALUE)
-    private static final String PROP_NOT_FOUND_EXCLUSION_PATH_PATTERNS = "not-found.exclusion-path-patterns";
-
-
-    private static final int DEFAULT_TTL = 60 * 5; // 5 minutes
-
-    private static final boolean DEFAULT_SERVE_AUTHENTICATED_FROM_CACHE = false;
-
-    @Property(label = "Serve authenticated from cache",
-            description = "Serve authenticated requests from the error page cache. [ Default: false ]",
-            boolValue = DEFAULT_SERVE_AUTHENTICATED_FROM_CACHE)
-    private static final String PROP_SERVE_AUTHENTICATED_FROM_CACHE = "cache.serve-authenticated";
-    private static final String LEGACY_PROP_SERVE_AUTHENTICATED_FROM_CACHE = "serve-authenticated-from-cache";
-
-    @Property(label = "TTL (in seconds)",
-            description = "TTL for each cache entry in seconds. [ Default: 300 ]",
-            intValue = DEFAULT_TTL)
+    private static final String[] LEGACY_PROP_SEARCH_PATHS = {"prop.paths"};
+    
+    private static final String PROP_NOT_FOUND_DEFAULT_BEHAVIOR = "notfound.behavior";
+    private static final String[] LEGACY_PROP_NOT_FOUND_DEFAULT_BEHAVIOR = {"not-found.behavior","prop.not-found.behavior"};
+    
+    private static final String PROP_NOT_FOUND_EXCLUSION_PATH_PATTERNS = "notfound.exclusionPathPattern";
+    private static final String[] LEGACY_PROP_NOT_FOUND_EXCLUSION_PATH_PATTERNS = {"not-found.exclusion-path-patterns","prop.not-found.exclusion-path-patterns"};
+    
     private static final String PROP_TTL = "cache.ttl";
-    private static final String LEGACY_PROP_TTL = "ttl";
+    private static final String[] LEGACY_PROP_TTL = {"prop.ttl","ttl"};
+    
+    private static final String PROP_SERVE_AUTHENTICATED_FROM_CACHE = "cache.serveAuthenticated";
+    private static final String[] LEGACY_PROP_SERVE_AUTHENTICATED_FROM_CACHE = {"cache.serve-authenticated",
+    		"prop.cache.serve-authenticated","serve-authenticated-from-cache","prop.serve-authenticated-from-cache"};
+    
+    private static final String PROP_ERROR_IMAGES_ENABLED = "errorimages.enabled";
+    private static final String[] LEGACY_PROP_ERROR_IMAGES_ENABLED = {"error-images.enabled","prop.error-images.enabled"};
+    
+    private static final String PROP_ERROR_IMAGE_PATH = "errorimages.path";
+    private static final String[] LEGACY_PROP_ERROR_IMAGE_PATH = {"error-images.path","prop.error-images.path"};
+    
+    private static final String PROP_ERROR_IMAGE_EXTENSIONS = "errorimages.extension";
+    private static final String[] LEGACY_PROP_ERROR_IMAGE_EXTENSIONS = {"error-images.extensions","prop.error-images.extensions"};
 
-    /* Enable/Disables error images */
-    private static final boolean DEFAULT_ERROR_IMAGES_ENABLED = false;
+    private static final String SERVICE_NAME = "error-page-handler";	
 
-    private boolean errorImagesEnabled = DEFAULT_ERROR_IMAGES_ENABLED;
 
-    @Property(label = "Enable placeholder images", description = "Enable image error handling  [ Default: false ]",
-            boolValue = DEFAULT_ERROR_IMAGES_ENABLED)
-    private static final String PROP_ERROR_IMAGES_ENABLED = "error-images.enabled";
 
-    /* Relative placeholder image path */
-    private static final String DEFAULT_ERROR_IMAGE_PATH = ".img.png";
+    // Local variables 
 
-    private String errorImagePath = DEFAULT_ERROR_IMAGE_PATH;
+    boolean enabled;
+    boolean vanityDispatchCheckEnabled;
+	private String systemErrorPagePath;
+	String errorPageExtension;
+	String fallbackErrorName;
+    private SortedMap<String, String> pathMap = new TreeMap<String, String>();
+    String notFoundBehavior;
+    ArrayList<Pattern> notFoundExclusionPatterns;
+    boolean errorImagesEnabled;
+    String errorImagePath;
+    String[] errorImageExtensions;
+    
 
-    @Property(label = "Error image path/selector",
-            description = "Accepts a selectors.extension (ex. `.img.png`) absolute, or relative path. "
-                    + "If an extension or relative path, this value is applied to the resolved error page."
-                    + " Note: This concatenated path must resolve to a nt:file else a 200 response will be sent."
-                    + " [ Optional ] [ Default: .img.png ]",
-            value = DEFAULT_ERROR_IMAGE_PATH)
-    private static final String PROP_ERROR_IMAGE_PATH = "error-images.path";
 
-    /* Error image extensions to handle */
-    private static final String[] DEFAULT_ERROR_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif"};
 
-    private static final String SERVICE_NAME = "error-page-handler";
-
-    private String[] errorImageExtensions = DEFAULT_ERROR_IMAGE_EXTENSIONS;
-
-    @Property(
-            label = "Error image extensions",
-            description = "List of valid image extensions (no proceeding .) to handle. "
-                    + "Example: 'png' "
-                    + "[ Optional ] [ Default: png, jpeg, jpeg, gif ]",
-            cardinality = Integer.MAX_VALUE,
-            value = { "png", "jpeg", "jpg", "gif" })
-    private static final String PROP_ERROR_IMAGE_EXTENSIONS = "error-images.extensions";
 
     @Reference
     private ResourceResolverFactory resourceResolverFactory;
@@ -259,9 +301,11 @@ public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
 
     private ErrorPageCache cache;
 
-    private SortedMap<String, String> pathMap = new TreeMap<String, String>();
+
 
     private ServiceRegistration cacheRegistration;
+
+
 
     /**
      * Find the JCR full path to the most appropriate Error Page.
@@ -804,8 +848,8 @@ public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
     }
 
     @Activate
-    protected void activate(ComponentContext componentContext) {
-        configure(componentContext);
+    protected void activate(Configuration config, ComponentContext context) {
+        configure(config, context);
     }
 
     @Deactivate
@@ -816,45 +860,91 @@ public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
             cacheRegistration = null;
         }
     }
-
+    
+    
+    protected String getProperty (Dictionary<String,?> properties, String[] legacyNames, String propertyName, String defaultValue ) {
+    	for (String p: legacyNames) {
+    		if (properties.get(p) != null) {
+            	log.warn("Using the deprecated configuration property {}, but please switch to {}", p, propertyName);
+            	return PropertiesUtil.toString(properties.get(p), "");
+            } 
+    	}
+    	return defaultValue;
+    }	
+    
+    protected boolean getProperty (Dictionary<String,?> properties, String[] legacyNames, String propertyName, boolean defaultValue ) {
+    	
+    	for (String p: legacyNames) {
+    		if (properties.get(p) != null) {
+            	log.warn("Using the deprecated configuration property {}, but please switch to {}", p, propertyName);
+            	return PropertiesUtil.toBoolean(properties.get(p), true);
+            }
+    	}
+    	return defaultValue;
+    }	
+    
+    protected int getProperty (Dictionary<String,?> properties, String[] legacyNames, String propertyName, int defaultValue ) {
+    	for (String p: legacyNames) {
+    		if (properties.get(p) != null) {
+            	log.warn("Using the deprecated configuration property {}, but please switch to {}", p, propertyName);
+            	return PropertiesUtil.toInteger(properties.get(p), 0);
+            }
+    	}
+    	return defaultValue;
+    }
+    
+    protected String[] getProperty (Dictionary<String,?> properties, String[] legacyNames, String propertyName, String[] defaultValue ) {
+    	for (String p: legacyNames) {
+    		if (properties.get(p) != null) {
+            	log.warn("Using the deprecated configuration property {}, but please switch to {}", p, propertyName);
+            	return PropertiesUtil.toStringArray(properties.get(p), new String[]{});
+            }
+    	}
+    	return defaultValue;
+    }	
+    
+    /**
+     * Although the use of the configuration object should ease the configuration process
+     * a lot, it makes it harder here. In OSGI r6 and r7 it's not possible to create property names
+     * with a "-" (dash) in it.
+     * Therefor we had to rename these properties (again); to handle these old property names
+     * plus the legacy names already supported earlier, this complex lookup has been created, which
+     * recommends users to switch to the new names (via logging).
+     * Ideally we should be able to remove the support for these legacy names in the not-so-far future.
+     * 
+     * @param config
+     * @param context
+     */
     @SuppressWarnings("squid:S1149")
-    private void configure(ComponentContext componentContext) {
-        Dictionary<?, ?> config = componentContext.getProperties();
-        final String legacyPrefix = "prop.";
-
-        this.enabled = PropertiesUtil.toBoolean(config.get(PROP_ENABLED),
-                PropertiesUtil.toBoolean(config.get(legacyPrefix + PROP_ENABLED),
-                        DEFAULT_ENABLED));
+    private void configure(Configuration config, ComponentContext context) {
+    	Dictionary<String,?> props = context.getProperties();
+    	
+    	this.enabled = getProperty (props, LEGACY_PROP_ENABLED, PROP_ENABLED, config.enabled());
+    	
+        this.vanityDispatchCheckEnabled = getProperty(props, LEGACY_PROP_VANITY_DISPATCH_CHECK_ENABLED, 
+        		PROP_VANITY_DISPATCH_CHECK_ENABLED,config.vanity_dispatch_enabled());
         
-        this.vanityDispatchCheckEnabled = PropertiesUtil.toBoolean(config.get(PROP_VANITY_DISPATCH_ENABLED),
-                PropertiesUtil.toBoolean(config.get(legacyPrefix + PROP_VANITY_DISPATCH_ENABLED),
-                        DEFAULT_VANITY_DISPATCH_ENABLED));
 
         /** Error Pages **/
+        this.systemErrorPagePath = getProperty(props,LEGACY_PROP_ERROR_PAGE_PATH, 
+        		PROP_ERROR_PAGE_PATH, config.errorpage_systempath());
 
-        this.systemErrorPagePath = PropertiesUtil.toString(config.get(PROP_ERROR_PAGE_PATH),
-                PropertiesUtil.toString(config.get(legacyPrefix + PROP_ERROR_PAGE_PATH),
-                        DEFAULT_SYSTEM_ERROR_PAGE_PATH_DEFAULT));
+        this.errorPageExtension = getProperty(props,LEGACY_PROP_ERROR_PAGE_EXTENSION, 
+        		PROP_ERROR_PAGE_EXTENSION, config.errorpage_extension());
+        
+        this.fallbackErrorName = getProperty(props,LEGACY_PROP_FALLBACK_ERROR_NAME, 
+        		PROP_FALLBACK_ERROR_NAME, config.errorpage_fallbackname());
 
-        this.errorPageExtension = PropertiesUtil.toString(config.get(PROP_ERROR_PAGE_EXTENSION),
-                PropertiesUtil.toString(config.get(legacyPrefix + PROP_ERROR_PAGE_EXTENSION),
-                        DEFAULT_ERROR_PAGE_EXTENSION));
-
-        this.fallbackErrorName = PropertiesUtil.toString(config.get(PROP_FALLBACK_ERROR_NAME),
-                PropertiesUtil.toString(config.get(legacyPrefix + PROP_FALLBACK_ERROR_NAME),
-                        DEFAULT_FALLBACK_ERROR_NAME));
-
-        this.pathMap = configurePathMap(PropertiesUtil.toStringArray(config.get(PROP_SEARCH_PATHS),
-                PropertiesUtil.toStringArray(config.get(legacyPrefix + PROP_SEARCH_PATHS),
-                        DEFAULT_SEARCH_PATHS)));
-
+        this.pathMap = configurePathMap(getProperty(props,LEGACY_PROP_SEARCH_PATHS,
+        		PROP_SEARCH_PATHS,config.paths()));
+        
         /** Not Found Handling **/
-        this.notFoundBehavior = PropertiesUtil.toString(config.get(PROP_NOT_FOUND_DEFAULT_BEHAVIOR),
-                DEFAULT_NOT_FOUND_DEFAULT_BEHAVIOR);
+        this.notFoundBehavior = getProperty(props,LEGACY_PROP_NOT_FOUND_DEFAULT_BEHAVIOR, 
+        		PROP_NOT_FOUND_DEFAULT_BEHAVIOR, config.notfound_behaviour());
 
-        String[] tmpNotFoundExclusionPatterns = PropertiesUtil.toStringArray(
-                config.get(PROP_NOT_FOUND_EXCLUSION_PATH_PATTERNS), DEFAULT_NOT_FOUND_EXCLUSION_PATH_PATTERNS);
-
+        String[] tmpNotFoundExclusionPatterns = getProperty(props, LEGACY_PROP_NOT_FOUND_EXCLUSION_PATH_PATTERNS, 
+        		PROP_NOT_FOUND_EXCLUSION_PATH_PATTERNS, config.notfound_exclusionPathPattern());
+        
         this.notFoundExclusionPatterns = new ArrayList<Pattern>();
         for (final String tmpPattern : tmpNotFoundExclusionPatterns) {
             this.notFoundExclusionPatterns.add(Pattern.compile(tmpPattern));
@@ -862,32 +952,31 @@ public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
 
 
         /** Error Page Cache **/
+        
+        int ttl = getProperty(props,LEGACY_PROP_TTL, PROP_TTL,config.cache_ttl());
+        
+        boolean serveAuthenticatedFromCache = getProperty(props,LEGACY_PROP_SERVE_AUTHENTICATED_FROM_CACHE,
+        		PROP_SERVE_AUTHENTICATED_FROM_CACHE,config.cache_serveAuthenticated());
 
-        int ttl = PropertiesUtil.toInteger(config.get(PROP_TTL),
-                PropertiesUtil.toInteger(LEGACY_PROP_TTL, DEFAULT_TTL));
-
-        boolean serveAuthenticatedFromCache = PropertiesUtil.toBoolean(config.get(PROP_SERVE_AUTHENTICATED_FROM_CACHE),
-                PropertiesUtil.toBoolean(LEGACY_PROP_SERVE_AUTHENTICATED_FROM_CACHE,
-                        DEFAULT_SERVE_AUTHENTICATED_FROM_CACHE));
         try {
             cache = new ErrorPageCacheImpl(ttl, serveAuthenticatedFromCache);
-
             Dictionary<String, Object> serviceProps = new Hashtable<String, Object>();
             serviceProps.put("jmx.objectname", "com.adobe.acs.commons:type=ErrorPageHandlerCache");
 
-            cacheRegistration = componentContext.getBundleContext().registerService(DynamicMBean.class.getName(),
+            cacheRegistration = context.getBundleContext().registerService(DynamicMBean.class.getName(),
                     cache, serviceProps);
         } catch (NotCompliantMBeanException e) {
             log.error("Unable to create cache", e);
         }
 
         /** Error Images **/
+        
+        this.errorImagesEnabled = getProperty(props,LEGACY_PROP_ERROR_IMAGES_ENABLED,
+        		PROP_ERROR_IMAGES_ENABLED,config.errorimages_enabled());
 
-        this.errorImagesEnabled = PropertiesUtil.toBoolean(config.get(PROP_ERROR_IMAGES_ENABLED),
-                DEFAULT_ERROR_IMAGES_ENABLED);
+        this.errorImagePath = getProperty(props,LEGACY_PROP_ERROR_IMAGE_PATH,
+        		PROP_ERROR_IMAGE_PATH,config.errorimages_path());
 
-        this.errorImagePath = PropertiesUtil.toString(config.get(PROP_ERROR_IMAGE_PATH),
-                DEFAULT_ERROR_IMAGE_PATH);
 
         // Absolute path
         if (StringUtils.startsWith(this.errorImagePath, "/")) {
@@ -915,9 +1004,9 @@ public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
                 }
             }
         }
-
-        this.errorImageExtensions = PropertiesUtil.toStringArray(config.get(PROP_ERROR_IMAGE_EXTENSIONS),
-                DEFAULT_ERROR_IMAGE_EXTENSIONS);
+        
+        this.errorImageExtensions = getProperty(props,LEGACY_PROP_ERROR_IMAGE_EXTENSIONS,
+        		PROP_ERROR_IMAGE_EXTENSIONS,config.errorimages_extensions());
 
         for (int i = 0; i < errorImageExtensions.length; i++) {
             this.errorImageExtensions[i] = StringUtils.lowerCase(errorImageExtensions[i], Locale.ENGLISH);

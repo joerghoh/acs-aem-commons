@@ -19,8 +19,19 @@
  */
 package com.adobe.acs.commons.errorpagehandler.impl;
 
+import static org.junit.Assert.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.lang.annotation.Annotation;
+import java.util.Dictionary;
+import java.util.HashMap;
+import java.util.Hashtable;
+import java.util.Map;
+
 import org.apache.sling.api.resource.NonExistingResource;
 import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.testing.mock.osgi.MockOsgi;
 import org.apache.sling.testing.mock.sling.junit.SlingContext;
 import org.apache.sling.testing.mock.sling.servlet.MockSlingHttpServletRequest;
 import org.junit.Before;
@@ -29,8 +40,11 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.osgi.framework.BundleContext;
+import org.osgi.service.component.ComponentContext;
 
-import static org.junit.Assert.assertEquals;
+import com.adobe.acs.commons.errorpagehandler.impl.ErrorPageHandlerImpl.Configuration;
+import com.fasterxml.jackson.databind.deser.BuilderBasedDeserializer;
 
 @RunWith(MockitoJUnitRunner.class)
 public class ErrorPageHandlerImplTest {
@@ -48,13 +62,79 @@ public class ErrorPageHandlerImplTest {
     	request = context.request();
     }
     
+    
+    /**
+     * Create default configuration
+     * @return
+     */
+    ErrorPageHandlerImpl.Configuration buildDefaultConfiguration () {
+    	return new ErrorPageHandlerImpl.Configuration() {
+    		public Class<? extends Annotation> annotationType() {return null;}
+			public boolean enabled() {return true;}
+			public boolean vanity_dispatch_enabled() {return false;}
+			public String errorpage_extension() {return "html";}
+			public String errorpage_fallbackname() {return null;}
+			public String errorpage_systempath() {return null;}
+			public String[] paths() {return new String[]{};}
+			public String notfound_behaviour() {return null;}
+			public String[] notfound_exclusionPathPattern() {return new String[]{};}
+			public boolean cache_serveAuthenticated() {return false;}
+			public int cache_ttl() {return 0;}
+			public boolean errorimages_enabled() { return false; }
+			public String errorimages_path() { return null; }
+			public String[] errorimages_extensions() { return new String[]{};}
+    		
+    	};
+    }
+    
+    ErrorPageHandlerImpl createErrorPageHandler() {
+    	ErrorPageHandlerImpl ephi = new ErrorPageHandlerImpl();
+    	ErrorPageHandlerImpl.Configuration configuration = buildDefaultConfiguration();
+    	
+    	BundleContext bundleContext = MockOsgi.newBundleContext();
+    	Map<String,Object> properties = new HashMap<String,Object>();
+    	ComponentContext componentContext = MockOsgi
+    			.componentContext()
+    			.bundleContext(bundleContext)
+    			.properties(properties)
+    			.build();
+    	
+    	ephi.activate(configuration, componentContext);
+    	
+    	return ephi;
+    }
+    
+    
+    /**
+     * Test the handling of the legacy property names
+     */
+    @Test
+    public void testLegacyConfigurationNameLookup() {
+    	ErrorPageHandlerImpl ephi = new ErrorPageHandlerImpl();
+    	String[] legacyPropertyNames = new String[]{"legacy1","legacy2"};
+    	Dictionary<String,Object> props = new Hashtable<>();
+    	// no properties provided => default value
+    	assertEquals("123",ephi.getProperty(props, legacyPropertyNames, "newPropertyName", "123"));
+    	
+    	// legacy property found
+    	props.put("legacy1", "abc");
+    	assertEquals("abc",ephi.getProperty(props, legacyPropertyNames, "newPropertyName", "123"));
+    	
+    	// legacy and new property found
+    	props.put("newPropertyName", "newProp");
+    	assertEquals("abc",ephi.getProperty(props, legacyPropertyNames, "newPropertyName", "123"));
+    	
+    }
+    
+    
+    
     /**
      * Test {@link ErrorPageHandlerImpl#findErrorPage(org.apache.sling.api.SlingHttpServletRequest, org.apache.sling.api.resource.Resource)}
      * with a page without {@code jcr:content} node.
      */
     @Test
     public void testFindErrorPage_withoutContent() {
-        assertEquals("/content/project/test/error-pages.html", new ErrorPageHandlerImpl().findErrorPage(request, resourceResolver.getResource("/content/project/test/page-without-content")));
+        assertEquals("/content/project/test/error-pages.html", createErrorPageHandler().findErrorPage(request, resourceResolver.getResource("/content/project/test/page-without-content")));
     }
 
     /**
@@ -63,34 +143,34 @@ public class ErrorPageHandlerImplTest {
      */
     @Test
     public void testFindErrorPage_withDirectConfig() {
-    	assertEquals("/content/project/test/error-pages2.html", new ErrorPageHandlerImpl().findErrorPage(request, resourceResolver.getResource("/content/project/test/page-with-config")));
+    	assertEquals("/content/project/test/error-pages2.html", createErrorPageHandler().findErrorPage(request, resourceResolver.getResource("/content/project/test/page-with-config")));
     }
     
     @Test
     public void testFindErrorPage_subResource() {
-        assertEquals("/content/project/test/error-pages.html", new ErrorPageHandlerImpl().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/jcr:content/root/non-existing-resource")));
+        assertEquals("/content/project/test/error-pages.html", createErrorPageHandler().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/jcr:content/root/non-existing-resource")));
     }
 
     @Test
     public void testFindErrorPage_nonExistingPage() {
-        assertEquals("/content/project/test/error-pages.html", new ErrorPageHandlerImpl().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/non-existing-page")));
+        assertEquals("/content/project/test/error-pages.html", createErrorPageHandler().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/non-existing-page")));
     }
 
     @Ignore // does not work at the moment because the mocked resourceResolver does not support NonExistingResource in the used version
     @Test
     public void testFindErrorPage_nonExistingPageSubResource() {
-        assertEquals("/content/project/test/error-pages.html", new ErrorPageHandlerImpl().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/non-existing-page/jcr:content/test1/test2")));
+        assertEquals("/content/project/test/error-pages.html", createErrorPageHandler().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/non-existing-page/jcr:content/test1/test2")));
     }
 
     @Test
     public void testFindErrorPage_nonExistingPageWithoutExtension() {
-        assertEquals("/content/project/test/error-pages.html", new ErrorPageHandlerImpl().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/non-existing-page")));
+        assertEquals("/content/project/test/error-pages.html", createErrorPageHandler().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/non-existing-page")));
     }
 
     @Test
     public void testFindErrorPage_JcrContent0() {
         assertEquals("/content/project/test/error-pages.html",
-                new ErrorPageHandlerImpl().findErrorPage(request,
+        		createErrorPageHandler().findErrorPage(request,
                         new NonExistingResource(resourceResolver, "/content/project/jcr:content/non-existing")));
     }
 }
