@@ -997,7 +997,7 @@ public final class ErrorPageHandlerImpl implements ErrorPageHandlerService {
                     }
                 }
             } catch (LoginException e) {
-                log.error("Could not get admin resource resolver to inspect validity of absolute errorImagePath");
+                log.error("Could not get service resource resolver to inspect validity of absolute errorImagePath");
             } finally {
                 if (serviceResourceResolver != null) {
                     serviceResourceResolver.close();
