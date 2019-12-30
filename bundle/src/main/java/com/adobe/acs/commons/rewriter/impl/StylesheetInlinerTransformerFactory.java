@@ -55,10 +55,7 @@ import com.adobe.granite.ui.clientlibs.LibraryType;
  * them as <style> elements. Links found in <head> are added to the beginning of
  * <body>, whereas those in <body> are included where they're found.
  */
-@Component(
-        metatype = false,
-        label = "Stylesheet Inliner Transformer Factory",
-        description = "Sling Rewriter Transformer Factory which inlines CSS references")
+@Component()
 @Properties({
     @Property(name = "pipeline.type", value = "inline-css", propertyPrivate = true)})
 @Service(value = {TransformerFactory.class})

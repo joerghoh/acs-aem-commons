@@ -49,11 +49,10 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
 
-@SlingServlet(label = "ACS AEM Commons - Audit Log Search Servlet",
-        methods = {"GET"},
+@SlingServlet(methods = {"GET"},
         resourceTypes = {"acs-commons/components/utilities/audit-log-search"},
         selectors = {"auditlogsearch"},
-        extensions = {"json"}, metatype = false)
+        extensions = {"json"})
 @SuppressWarnings("serial")
 public class AuditLogSearchServlet extends SlingSafeMethodsServlet {
 

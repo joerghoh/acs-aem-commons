@@ -76,10 +76,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * than once.  This also covers the scenario where a script is run a second
  * time after failing the first time.
  */
-@Component(
-        label = "ACS AEM Commons - On-Deploy Scripts Executor",
-        description = "Developer tool that triggers scripts (specified via an implementation of OnDeployScriptProvider) to execute on deployment.",
-        metatype = false, policy = ConfigurationPolicy.REQUIRE)
+@Component(policy = ConfigurationPolicy.REQUIRE)
 @Properties({ @Property(label = "MBean Name", name = "jmx.objectname",
         value = "com.adobe.acs.commons:type=On-Deploy Scripts", propertyPrivate = true) })
 @Service(value = {DynamicMBean.class, OnDeployExecutorMBean.class, OnDeployExecutor.class})

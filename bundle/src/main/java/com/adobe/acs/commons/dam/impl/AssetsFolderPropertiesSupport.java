@@ -55,7 +55,6 @@ import java.util.HashMap;
 import java.util.List;
 
 @Component(
-        label = "ACS AEM Commons - Assets Folder Properties Support",
         policy = ConfigurationPolicy.REQUIRE,
         immediate = true
 )

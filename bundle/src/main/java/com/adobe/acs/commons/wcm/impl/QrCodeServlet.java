@@ -39,7 +39,6 @@ import javax.servlet.ServletException;
 import java.io.IOException;
 
 @Component(
-        label = "ACS AEM Commons - QR Code Configuration Servlet",
         policy = ConfigurationPolicy.REQUIRE,
         immediate = true
 )
